@@ -2,6 +2,8 @@
 
 This project uses a `uv`-managed virtual environment for fast, reproducible Python workflows.
 
+Note: In commands and paths, always use the placeholder `<YOUR-WORKING-DIR>/learn-vllm` instead of your actual absolute directory. For example, prefer `cd <YOUR-WORKING-DIR>/learn-vllm` rather than `/home/aiserver/LABS/GPU-CLUSTER/learn-vllm`.
+
 ### 1) Prerequisites
 - Python 3.10+ available on your PATH
 - Install `uv` (one-time):

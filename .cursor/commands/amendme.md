@@ -1,0 +1,1 @@
+git add all changes and amend last commit and provide more descriptive commit message, one line followed with description of changes and push force replacing last commit 

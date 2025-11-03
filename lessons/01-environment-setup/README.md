@@ -17,7 +17,7 @@ uv --version
 
 2) Create and activate the venv in the workspace root:
 ```bash
-cd /home/aiserver/LABS/GPU-CLUSTER/learn-vllm
+cd <YOUR-WORKING-DIR>/learn-vllm
 uv venv .venv
 source .venv/bin/activate
 ```

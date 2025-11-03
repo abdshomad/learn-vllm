@@ -1,0 +1,1 @@
+git add all changes, commit with more descriptive message, one line followed with description of changes then push to remote
