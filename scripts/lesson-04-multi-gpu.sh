@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# lesson-02-hello-vllm-server.sh
-# Manage a local OpenAI-compatible vLLM server using the project's uv environment.
+# lesson-04-multi-gpu.sh
+# Start/stop a multi-GPU vLLM server using tensor parallelism.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/scripts/logs"
-PID_FILE="$LOG_DIR/lesson-02-hello-vllm-server.pid"
+PID_FILE="$LOG_DIR/lesson-04-multi-gpu.pid"
 
 DEFAULT_MODEL="TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 DEFAULT_PORT="8000"
 DEFAULT_DTYPE="auto"
+DEFAULT_TP_SIZE="2"
+DEFAULT_GPU_UTIL="0.92"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") <start|stop|status|logs|test> [options]
 
 Commands:
-  start                Start vLLM server in background
+  start                Start vLLM server with tensor parallelism in background
   stop                 Stop running vLLM server
   status               Show server status (PID/port/listen)
   logs [-f]            Show latest server log (use -f to follow)
@@ -26,20 +28,16 @@ Commands:
 
 Options for start:
   -m, --model MODEL            HF model id (default: $DEFAULT_MODEL)
-  -p, --port PORT              Port to listen on (default: $DEFAULT_PORT)
+  -p, --port PORT              Starting port to try (default: $DEFAULT_PORT)
   --dtype DTYPE                Data type, e.g. auto, float16, bfloat16 (default: $DEFAULT_DTYPE)
+  --tp N                       Tensor parallel size (default: $DEFAULT_TP_SIZE)
+  --gpu-memory-utilization V   Fraction [0-1] (default: $DEFAULT_GPU_UTIL)
   --max-model-len N            Optional max model length
+  --gpus CSV                   Optional CUDA devices, e.g. 0,1 or 0,2 (sets CUDA_VISIBLE_DEVICES)
 
 Options for test:
-  -m, --model MODEL            Model name served by the API (optional)
   -p, --port PORT              Server port (default: $DEFAULT_PORT)
   -q, --query PROMPT           User prompt (default: "Say hello in one sentence.")
-
-Examples:
-  $(basename "$0") start -m "$DEFAULT_MODEL" -p 8000 --dtype auto
-  $(basename "$0") status
-  $(basename "$0") logs -f
-  $(basename "$0") test -p 8000 -q "What is vLLM?"
 EOF
 }
 
@@ -59,26 +57,41 @@ ensure_log_dir() {
   mkdir -p "$LOG_DIR"
 }
 
+find_free_port() {
+  local start_port="$1"
+  local candidate="$start_port"
+  for _ in $(seq 0 200); do
+    if ss -ltn | grep -q ":${candidate}\\b"; then
+      candidate=$((candidate + 1))
+    else
+      echo "$candidate"
+      return 0
+    fi
+  done
+  echo "" # no port found
+  return 1
+}
+
 start_server() {
   local model="$DEFAULT_MODEL"
   local port="$DEFAULT_PORT"
   local dtype="$DEFAULT_DTYPE"
+  local tp_size="$DEFAULT_TP_SIZE"
+  local gpu_util="$DEFAULT_GPU_UTIL"
   local max_model_len=""
+  local gpus=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -m|--model)
-        model="$2"; shift 2 ;;
-      -p|--port)
-        port="$2"; shift 2 ;;
-      --dtype)
-        dtype="$2"; shift 2 ;;
-      --max-model-len)
-        max_model_len="$2"; shift 2 ;;
-      -h|--help)
-        usage; exit 0 ;;
-      *)
-        echo "Unknown option: $1" >&2; usage; exit 1 ;;
+      -m|--model) model="$2"; shift 2 ;;
+      -p|--port) port="$2"; shift 2 ;;
+      --dtype) dtype="$2"; shift 2 ;;
+      --tp) tp_size="$2"; shift 2 ;;
+      --gpu-memory-utilization) gpu_util="$2"; shift 2 ;;
+      --max-model-len) max_model_len="$2"; shift 2 ;;
+      --gpus) gpus="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
   done
 
@@ -90,39 +103,37 @@ start_server() {
     exit 0
   fi
 
-  # Find an available port incrementally if requested port is busy
-  try_port="$port"
-  for _ in $(seq 0 50); do
-    if ss -ltn | grep -q ":${try_port}\\b"; then
-      try_port=$((try_port + 1))
-    else
-      break
-    fi
-  done
-  if ss -ltn | grep -q ":${try_port}\\b"; then
-    echo "[start] Could not find a free port starting at $port within 51 attempts." >&2
+  local free_port
+  free_port="$(find_free_port "$port" || true)"
+  if [[ -z "$free_port" ]]; then
+    echo "[start] Could not find a free port starting at $port within range." >&2
     exit 1
   fi
-  if [[ "$try_port" != "$port" ]]; then
-    echo "[start] Port $port busy; using next available port $try_port"
+  if [[ "$free_port" != "$port" ]]; then
+    echo "[start] Port $port busy; using next available port $free_port"
   fi
-  port="$try_port"
+  port="$free_port"
 
+  local ts log_file
   ts="$(date +%Y%m%d-%H%M%S)"
-  log_file="$LOG_DIR/lesson-02-hello-vllm-server-${port}-${ts}.log"
+  log_file="$LOG_DIR/lesson-04-multi-gpu-${port}-${ts}.log"
 
-  cmd=(uvx vllm serve "$model" --port "$port" --dtype "$dtype")
+  local -a cmd
+  cmd=(uvx vllm serve "$model" --port "$port" --dtype "$dtype" --tensor-parallel-size "$tp_size" --gpu-memory-utilization "$gpu_util")
   if [[ -n "$max_model_len" ]]; then
     cmd+=(--max-model-len "$max_model_len")
   fi
 
+  if [[ -n "$gpus" ]]; then
+    export CUDA_VISIBLE_DEVICES="$gpus"
+    echo "[start] Using CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES" | tee -a "$log_file"
+  fi
+
   echo "[start] Launching: ${cmd[*]}" | tee -a "$log_file"
-  # Run in background with nohup, capture PID
   nohup "${cmd[@]}" >"$log_file" 2>&1 &
   echo $! > "$PID_FILE"
-  echo "[start] PID $(cat "$PID_FILE") | log $log_file"
+  echo "[start] PID $(cat "$PID_FILE") | port $port | log $log_file"
 
-  # Brief wait then print status
   sleep 3
   "$0" status || true
 }
@@ -146,7 +157,6 @@ stop_server() {
   fi
   echo "[stop] Terminating PID $pid"
   kill "$pid" || true
-  # Graceful wait, then SIGKILL if necessary
   for i in {1..20}; do
     if ps -p "$pid" >/dev/null 2>&1; then
       sleep 0.5
@@ -172,8 +182,7 @@ status_server() {
   else
     echo "[status] Not running"
   fi
-  # Show listeners for common ports
-  ss -ltnp | awk 'NR==1 || /:8000 |:8010 |:8020 / {print}' || true
+  ss -ltnp | awk 'NR==1 || /:8000 |:8010 |:8020 |:80[2-9][0-9] / {print}' || true
 }
 
 logs_view() {
@@ -183,7 +192,7 @@ logs_view() {
   fi
   ensure_log_dir
   local latest
-  latest="$(ls -1t "$LOG_DIR"/lesson-02-hello-vllm-server-*.log 2>/dev/null | head -n 1 || true)"
+  latest="$(ls -1t "$LOG_DIR"/lesson-04-multi-gpu-*.log 2>/dev/null | head -n 1 || true)"
   if [[ -z "$latest" ]]; then
     echo "[logs] No logs found in $LOG_DIR"
     exit 0
@@ -197,51 +206,28 @@ logs_view() {
 }
 
 test_query() {
-  local model=""
   local port="$DEFAULT_PORT"
   local prompt="Say hello in one sentence."
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -m|--model)
-        model="$2"; shift 2 ;;
-      -p|--port)
-        port="$2"; shift 2 ;;
-      -q|--query)
-        prompt="$2"; shift 2 ;;
-      -h|--help)
-        usage; exit 0 ;;
-      *)
-        echo "Unknown option: $1" >&2; usage; exit 1 ;;
+      -p|--port) port="$2"; shift 2 ;;
+      -q|--query) prompt="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
   done
 
-  # Verify server is reachable
   if ! curl -s "http://localhost:${port}/v1/models" >/dev/null; then
     echo "[test] Server not reachable at http://localhost:${port}. Start it first." >&2
     exit 1
   fi
 
-  # If model not provided, try to detect first available via jq; fallback to DEFAULT_MODEL
-  if [[ -z "$model" ]]; then
-    if command -v jq >/dev/null 2>&1; then
-      model="$(curl -s "http://localhost:${port}/v1/models" | jq -r '.data[0].id // empty')"
-    fi
-    if [[ -z "$model" ]]; then
-      model="$DEFAULT_MODEL"
-    fi
-  fi
-
-  echo "[test] Using model: $model"
-  echo "[test] Prompt: $prompt"
-
-  # Build JSON payload safely; prefer jq if available
-  local payload
+  local payload response
   if command -v jq >/dev/null 2>&1; then
-    payload="$(jq -n --arg model "$model" --arg prompt "$prompt" '{model:$model, messages:[{role:"user", content:$prompt}], max_tokens:128}')"
+    payload="$(jq -n --arg prompt "$prompt" '{model:"", messages:[{role:"user", content:$prompt}], max_tokens:64}')"
   else
-    # Fallback minimal escaping (no jq). Newlines/quotes in prompt may break.
-    payload='{"model":"'"$model"'","messages":[{"role":"user","content":"'"$prompt"'"}],"max_tokens":128}'
+    payload='{"model":"","messages":[{"role":"user","content":"'"$prompt"'"}],"max_tokens":64}'
   fi
 
   response="$(curl -s -X POST "http://localhost:${port}/v1/chat/completions" \

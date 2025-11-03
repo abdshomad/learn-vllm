@@ -61,20 +61,20 @@ uvx jupyter notebook
 ```
 
 ### 6) Example: start a vLLM server (OpenAI-compatible)
-Pick a model you have access to (e.g., `meta-llama/Llama-3.1-8B-Instruct`). Ensure the model fits your GPU memory.
+Use `TinyLlama/TinyLlama-1.1B-Chat-v1.0` by default. Ensure the model fits your GPU memory.
 
 ```bash
 # Install vLLM if not already present
 uv pip install "vllm>=0.6"
 
 # Start the server (newer vLLM has the `serve` shorthand)
-uvx vllm serve meta-llama/Llama-3.1-8B-Instruct \
+uvx vllm serve TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
   --port 8000 \
   --dtype auto
 
 # Alternative (module entrypoint)
 uv run python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Llama-3.1-8B-Instruct \
+  --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
   --port 8000 \
   --dtype auto
 ```

@@ -18,7 +18,7 @@ uv pip install "vllm>=0.6" "openai>=1.40"
 
 3) Start a local server (choose a model you can run):
 ```bash
-uvx vllm serve meta-llama/Llama-3.1-8B-Instruct \
+uvx vllm serve TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
   --port 8000 \
   --dtype auto
 ```
