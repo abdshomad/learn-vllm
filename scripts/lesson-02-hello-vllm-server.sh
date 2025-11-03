@@ -90,10 +90,23 @@ start_server() {
     exit 0
   fi
 
-  if ss -ltn | grep -q ":$port\b"; then
-    echo "[start] Port $port appears in use. Choose another port with -p/--port." >&2
+  # Find an available port incrementally if requested port is busy
+  try_port="$port"
+  for _ in $(seq 0 50); do
+    if ss -ltn | grep -q ":${try_port}\\b"; then
+      try_port=$((try_port + 1))
+    else
+      break
+    fi
+  done
+  if ss -ltn | grep -q ":${try_port}\\b"; then
+    echo "[start] Could not find a free port starting at $port within 51 attempts." >&2
     exit 1
   fi
+  if [[ "$try_port" != "$port" ]]; then
+    echo "[start] Port $port busy; using next available port $try_port"
+  fi
+  port="$try_port"
 
   ts="$(date +%Y%m%d-%H%M%S)"
   log_file="$LOG_DIR/lesson-02-hello-vllm-server-${port}-${ts}.log"

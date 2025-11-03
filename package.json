@@ -1,0 +1,27 @@
+{
+  "name": "learn-vllm",
+  "version": "1.0.0",
+  "description": "Hands-on learning path for vLLM focused on running a local OpenAI-compatible server on a single multi-GPU node, then progressing to tuning, observability, and production hygiene.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abdshomad/learn-vllm.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/abdshomad/learn-vllm/issues"
+  },
+  "homepage": "https://github.com/abdshomad/learn-vllm#readme",
+  "dependencies": {
+    "openai": "^4.104.0"
+  }
+}
